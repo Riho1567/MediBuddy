@@ -1,109 +1,117 @@
 package com.medibox.ui
 
-import android.app.TimePickerDialog
+import android.content.Intent
 import android.os.Bundle
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import com.google.android.material.textfield.TextInputEditText
 import com.medibox.R
-import java.util.Calendar
+import com.medibox.data.repositorio.MedicamentoRepository
+import com.medibox.data.repositorio.RegistroHistorial
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
-    private var horaSeleccionadaTexto: String = "08:00 AM"
+    private lateinit var tvNombreMed: TextView
+    private lateinit var tvDosis: TextView
+    private lateinit var tvHoraProgramada: TextView
+    private lateinit var tvEstadoAlerta: TextView
+    private lateinit var btnConfirmar: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Vistas de la tarjeta principal
-        val tvNombreMed = findViewById<TextView>(R.id.tvNombreMedicamento)
-        val tvDosis = findViewById<TextView>(R.id.tvDosis)
-        val tvHoraProgramada = findViewById<TextView>(R.id.tvHoraProgramada)
-        val tvEstadoAlerta = findViewById<TextView>(R.id.tvEstadoAlerta)
-        val btnConfirmar = findViewById<Button>(R.id.btnConfirmarToma)
+        val tvSubtitulo = findViewById<TextView>(R.id.tvSubtitulo)
+        val usuario = intent.getStringExtra("USUARIO_NOMBRE")
+        if (!usuario.isNullOrEmpty()) {
+            tvSubtitulo.text = "Hola, $usuario • Compartimento 1"
+        }
+
+        tvNombreMed = findViewById(R.id.tvNombreMedicamento)
+        tvDosis = findViewById(R.id.tvDosis)
+        tvHoraProgramada = findViewById(R.id.tvHoraProgramada)
+        tvEstadoAlerta = findViewById(R.id.tvEstadoAlerta)
+        btnConfirmar = findViewById(R.id.btnConfirmarToma)
+
         val btnPosponer = findViewById<Button>(R.id.btnPosponerToma)
+        val btnIrRegistro = findViewById<Button>(R.id.btnIrRegistro)
+        val btnIrHistorial = findViewById<Button>(R.id.btnIrHistorial)
+        val btnCerrarSesion = findViewById<Button>(R.id.btnCerrarSesion)
 
-        // Vistas del formulario de programación
-        val etNombreMed = findViewById<TextInputEditText>(R.id.etNombreMedicamento)
-        val etDosisMed = findViewById<TextInputEditText>(R.id.etDosisMedicamento)
-        val tvHoraSeleccionada = findViewById<TextView>(R.id.tvHoraSeleccionada)
-        val btnElegirHora = findViewById<Button>(R.id.btnElegirHora)
-        val btnProgramar = findViewById<Button>(R.id.btnProgramarToma)
-
-        // Vistas de vinculación
-        val etCodigo = findViewById<TextInputEditText>(R.id.etCodigoVinculacion)
-        val btnVincular = findViewById<Button>(R.id.btnVincular)
-
-        // 1. Selector de hora (TimePickerDialog)
-        btnElegirHora.setOnClickListener {
-            val calendario = Calendar.getInstance()
-            val horaActual = calendario.get(Calendar.HOUR_OF_DAY)
-            val minutoActual = calendario.get(Calendar.MINUTE)
-
-            TimePickerDialog(this, { _, hora, minuto ->
-                val amPm = if (hora >= 12) "PM" else "AM"
-                val hora12 = if (hora % 12 == 0) 12 else hora % 12
-                horaSeleccionadaTexto = String.format(Locale.getDefault(), "%02d:%02d %s", hora12, minuto, amPm)
-                tvHoraSeleccionada.text = "Hora: $horaSeleccionadaTexto"
-            }, horaActual, minutoActual, false).show()
+        // Navegación a Registro de Medicamento
+        btnIrRegistro.setOnClickListener {
+            startActivity(Intent(this, RegistroActivity::class.java))
         }
 
-        // 2. Programar medicamento (actualiza la tarjeta de arriba)
-        btnProgramar.setOnClickListener {
-            val nombre = etNombreMed.text.toString().trim()
-            val dosis = etDosisMed.text.toString().trim()
-
-            if (nombre.isEmpty()) {
-                Toast.makeText(this, "Por favor ingresa el nombre del medicamento", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-
-            val dosisFinal = if (dosis.isNotEmpty()) dosis else "1 dosis"
-
-            // Actualizar tarjeta superior
-            tvNombreMed.text = nombre
-            tvDosis.text = "Dosis: $dosisFinal"
-            tvHoraProgramada.text = "Hora: $horaSeleccionadaTexto"
-            tvEstadoAlerta.text = "PRÓXIMA TOMA PROGRAMADA"
-            tvEstadoAlerta.setBackgroundColor(getColor(android.R.color.holo_blue_light))
-
-            // Habilitar botón de toma para el nuevo horario
-            btnConfirmar.isEnabled = true
-            btnConfirmar.text = "YA TOMÉ EL MEDICAMENTO"
-
-            // Limpiar inputs
-            etNombreMed.text?.clear()
-            etDosisMed.text?.clear()
-
-            Toast.makeText(this, "Toma programada con éxito", Toast.LENGTH_SHORT).show()
+        // Navegación a Historial
+        btnIrHistorial.setOnClickListener {
+            startActivity(Intent(this, HistorialActivity::class.java))
         }
 
-        // 3. Confirmar toma
+        // Volver al Login
+        btnCerrarSesion.setOnClickListener {
+            startActivity(Intent(this, LoginActivity::class.java))
+            finish()
+        }
+
+        // Confirmar toma y guardar en historial
         btnConfirmar.setOnClickListener {
-            Toast.makeText(this, "¡Toma confirmada exitosamente!", Toast.LENGTH_LONG).show()
+            val horaActual = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())
+            MedicamentoRepository.tomaConfirmada = true
+            MedicamentoRepository.historial.add(
+                0,
+                RegistroHistorial(
+                    medicamento = MedicamentoRepository.medicamentoActual,
+                    dosis = MedicamentoRepository.dosisActual,
+                    hora = "Hoy - $horaActual",
+                    estado = "TOMADO"
+                )
+            )
+
+            actualizarVistaToma()
+            Toast.makeText(this, "¡Toma guardada en el historial!", Toast.LENGTH_LONG).show()
+        }
+
+        // Posponer 5 minutos y registrar evento en historial
+        btnPosponer.setOnClickListener {
+            val horaActual = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())
+            MedicamentoRepository.historial.add(
+                0,
+                RegistroHistorial(
+                    medicamento = MedicamentoRepository.medicamentoActual,
+                    dosis = MedicamentoRepository.dosisActual,
+                    hora = "Hoy - $horaActual",
+                    estado = "POSPUESTO 5 MIN"
+                )
+            )
+            Toast.makeText(this, "Alarma pospuesta 5 minutos.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        actualizarVistaToma()
+    }
+
+    private fun actualizarVistaToma() {
+        tvNombreMed.text = MedicamentoRepository.medicamentoActual
+        tvDosis.text = "Dosis: ${MedicamentoRepository.dosisActual}"
+        tvHoraProgramada.text = "Hora: ${MedicamentoRepository.horaActual}"
+
+        if (MedicamentoRepository.tomaConfirmada) {
             btnConfirmar.isEnabled = false
             btnConfirmar.text = "TOMA REGISTRADA"
             tvEstadoAlerta.text = "MEDICAMENTO TOMADO"
-        }
-
-        // 4. Posponer 5 minutos
-        btnPosponer.setOnClickListener {
-            Toast.makeText(this, "Alarma pospuesta 5 minutos.", Toast.LENGTH_SHORT).show()
-        }
-
-        // 5. Vincular cuidador
-        btnVincular.setOnClickListener {
-            val codigo = etCodigo.text.toString().trim()
-            if (codigo.length >= 4) {
-                Toast.makeText(this, "Vinculado correctamente con código $codigo", Toast.LENGTH_SHORT).show()
-                etCodigo.text?.clear()
-            } else {
-                Toast.makeText(this, "Ingresa un código válido", Toast.LENGTH_SHORT).show()
-            }
+            tvEstadoAlerta.setBackgroundColor(getColor(android.R.color.holo_green_light))
+        } else {
+            btnConfirmar.isEnabled = true
+            btnConfirmar.text = "YA TOMÉ EL MEDICAMENTO"
+            tvEstadoAlerta.text = "PRÓXIMA TOMA PROGRAMADA"
+            tvEstadoAlerta.setBackgroundColor(getColor(android.R.color.holo_blue_light))
         }
     }
 }

@@ -2,7 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Permisos para avisos determinísticos con AlarmManager y Notificaciones -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
@@ -18,9 +17,9 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MediBox">
 
-        <!-- Actividad Principal -->
+        <!-- Pantalla inicial: Login estético -->
         <activity
-            android:name=".ui.MainActivity"
+            android:name=".ui.LoginActivity"
             android:exported="true"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
@@ -29,7 +28,22 @@
             </intent-filter>
         </activity>
 
-        <!-- Receptor de la Alarma para las Notificaciones -->
+        <!-- Pantalla de Tomas -->
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="false" />
+
+        <!-- Pantalla de Registro de Medicamentos -->
+        <activity
+            android:name=".ui.RegistroActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- Pantalla de Historial -->
+        <activity
+            android:name=".ui.HistorialActivity"
+            android:exported="false" />
+
         <receiver
             android:name=".servicios.AlarmaReceiver"
             android:enabled="true"
