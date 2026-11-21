@@ -17,6 +17,29 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MediBox">
 
+
+        <activity
+            android:name=".ui.MedicamentoActivity"
+            android:exported="false" />
+
+
+
+        <activity
+            android:name=".ui.AvisoDosisActivity"
+            android:exported="false" />
+
+
+        <activity
+            android:name=".ui.VinculacionActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+
+        <activity
+            android:name=".ui.RegistroCuentaActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- Pantalla inicial: Login estético -->
         <activity
             android:name=".ui.LoginActivity"
