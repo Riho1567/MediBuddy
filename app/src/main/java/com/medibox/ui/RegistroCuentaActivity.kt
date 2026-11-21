@@ -56,7 +56,8 @@ class RegistroCuentaActivity : AppCompatActivity() {
                 .putString("perfil", perfil)
                 .apply()
 
-            startActivity(Intent(this, MainActivity::class.java).apply {
+
+            startActivity(Intent(this, VinculacionActivity::class.java).apply {
                 putExtra("USUARIO_NOMBRE", nombre)
                 putExtra("PERFIL", perfil)
             })

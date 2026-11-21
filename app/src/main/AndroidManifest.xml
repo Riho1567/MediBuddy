@@ -19,6 +19,12 @@
 
 
         <activity
+            android:name=".ui.VinculacionActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+
+        <activity
             android:name=".ui.RegistroCuentaActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
