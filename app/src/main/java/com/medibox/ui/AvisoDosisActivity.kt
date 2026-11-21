@@ -14,10 +14,17 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.widget.ImageViewCompat
+import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
 import com.medibox.R
 import com.medibox.data.repositorio.MedicamentoRepository
 import com.medibox.data.repositorio.RegistroHistorial
+import com.medibox.network.RetrofitClient
+import com.medibox.network.SessionManager
+import com.medibox.network.model.CommandDto
+import com.medibox.network.model.UpdateStatusDto
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -69,23 +76,69 @@ class AvisoDosisActivity : AppCompatActivity() {
     // TEMPORAL: estas transiciones simulan el flujo. Con el pastillero y el
     // servidor, el estado lo decide la respuesta real.
     private fun accionPrimaria() {
+        val sessionManager = SessionManager(this)
+        val targetDeviceId = sessionManager.getLinkedDeviceId() ?: "ESP32_MED_01"
+        val scheduleId = getSharedPreferences("medibuddy", MODE_PRIVATE).getLong("med_id", -1L)
+
         when (estadoActual) {
-            Estado.PENDIENTE -> aplicarEstado(Estado.DISPENSADA)
+            Estado.PENDIENTE -> {
+                aplicarEstado(Estado.DISPENSADA)
+                // Disparar comando físico al ESP32 vía API
+                lifecycleScope.launch(Dispatchers.IO) {
+                    try {
+                        RetrofitClient.getDeviceApi(this@AvisoDosisActivity).sendCommand(
+                            targetDeviceId,
+                            CommandDto("DISPENSE_MEDICATION", mapOf("compartment" to 1))
+                        )
+                    } catch (e: Exception) {
+                        // Modo offline
+                    }
+                }
+            }
             Estado.PENDIENTE_SIN_CONEXION -> { /* sin conexión no se puede dispensar */ }
             Estado.DISPENSADA -> {
                 MedicamentoRepository.tomaConfirmada = true
                 registrarToma("TOMADO")
                 aplicarEstado(Estado.TOMADA)
+
+                // Confirmar toma en la API
+                if (scheduleId > 0) {
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        try {
+                            RetrofitClient.getDeviceApi(this@AvisoDosisActivity).updateScheduleStatus(
+                                targetDeviceId,
+                                scheduleId,
+                                UpdateStatusDto("TOMADA")
+                            )
+                        } catch (e: Exception) { }
+                    }
+                }
             }
             else -> irAlInicio()
         }
     }
 
     private fun accionSecundaria() {
+        val sessionManager = SessionManager(this)
+        val targetDeviceId = sessionManager.getLinkedDeviceId() ?: "ESP32_MED_01"
+        val scheduleId = getSharedPreferences("medibuddy", MODE_PRIVATE).getLong("med_id", -1L)
+
         when (estadoActual) {
             Estado.PENDIENTE, Estado.PENDIENTE_SIN_CONEXION -> {
                 registrarToma("POSPUESTO 5 MIN")
                 aplicarEstado(Estado.POSPUESTA)
+
+                if (scheduleId > 0) {
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        try {
+                            RetrofitClient.getDeviceApi(this@AvisoDosisActivity).updateScheduleStatus(
+                                targetDeviceId,
+                                scheduleId,
+                                UpdateStatusDto("POSPUESTA")
+                            )
+                        } catch (e: Exception) { }
+                    }
+                }
             }
             Estado.DISPENSADA -> startActivity(Intent(this, HistorialActivity::class.java))
             else -> {}

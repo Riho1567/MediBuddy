@@ -7,18 +7,30 @@ import android.os.Bundle
 import android.view.View
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.textfield.TextInputEditText
 import com.medibox.R
+import com.medibox.network.RetrofitClient
+import com.medibox.network.SessionManager
+import com.medibox.network.model.GenerateCodeDto
+import com.medibox.network.model.LinkCodeDto
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class VinculacionActivity : AppCompatActivity() {
+
+    private lateinit var sessionManager: SessionManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_vinculacion)
 
-        val perfil = intent.getStringExtra("PERFIL") ?: "ADULTO_MAYOR"
-        val nombre = intent.getStringExtra("USUARIO_NOMBRE") ?: "Paciente"
+        sessionManager = SessionManager(this)
+
+        val perfil = intent.getStringExtra("PERFIL") ?: sessionManager.getUserRole()
+        val nombre = intent.getStringExtra("USUARIO_NOMBRE") ?: sessionManager.getUserName()
 
         val tvTitulo = findViewById<TextView>(R.id.tvTituloVinc)
         val tvDesc = findViewById<TextView>(R.id.tvDescVinc)
@@ -44,16 +56,40 @@ class VinculacionActivity : AppCompatActivity() {
             tvDesc.text = "Dale este código a la persona que cuidas. Debe escribirlo en su celular."
             bloqueCuidador.visibility = View.VISIBLE
 
-            fun generarCodigo() {
-                val codigo = (100000..999999).random().toString()
-                prefs.edit()
-                    .putString("codigo_vinculacion", codigo)
-                    .putLong("codigo_expira", System.currentTimeMillis() + 10 * 60 * 1000)
-                    .apply()
-                tvCodigo.text = codigo.substring(0, 3) + " " + codigo.substring(3)
+            fun solicitarCodigoApi() {
+                lifecycleScope.launch(Dispatchers.IO) {
+                    try {
+                        val authApi = RetrofitClient.getAuthApi(this@VinculacionActivity)
+                        val res = authApi.generatePairingCode(
+                            GenerateCodeDto(
+                                caregiverUserId = sessionManager.getUserId().takeIf { it > 0 },
+                                caregiverDeviceId = sessionManager.getDeviceId()
+                            )
+                        )
+                        withContext(Dispatchers.Main) {
+                            if (res.isSuccessful && res.body() != null) {
+                                val code = res.body()!!.code
+                                prefs.edit().putString("codigo_vinculacion", code).apply()
+                                tvCodigo.text = code.substring(0, 3) + " " + code.substring(3)
+                            } else {
+                                // Fallback local
+                                val fallback = (100000..999999).random().toString()
+                                prefs.edit().putString("codigo_vinculacion", fallback).apply()
+                                tvCodigo.text = fallback.substring(0, 3) + " " + fallback.substring(3)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        withContext(Dispatchers.Main) {
+                            val fallback = (100000..999999).random().toString()
+                            prefs.edit().putString("codigo_vinculacion", fallback).apply()
+                            tvCodigo.text = fallback.substring(0, 3) + " " + fallback.substring(3)
+                        }
+                    }
+                }
             }
-            generarCodigo()
-            btnGenerar.setOnClickListener { generarCodigo() }
+
+            solicitarCodigoApi()
+            btnGenerar.setOnClickListener { solicitarCodigoApi() }
         } else {
             tvTitulo.text = "Vincúlate con tu cuidador"
             tvDesc.text = "Escribe el código de 6 dígitos que te dio tu cuidador."
@@ -65,9 +101,43 @@ class VinculacionActivity : AppCompatActivity() {
                     mostrarMensaje("El código debe tener 6 dígitos", false)
                     return@setOnClickListener
                 }
-                // TEMPORAL: aquí se llamará al servidor para validar el código.
-                prefs.edit().putString("codigo_ingresado", codigo).apply()
-                mostrarMensaje("Código enviado. Falta conectar con el servidor.", true)
+
+                btnVincular.isEnabled = false
+                btnVincular.text = "Verificando..."
+
+                lifecycleScope.launch(Dispatchers.IO) {
+                    try {
+                        val authApi = RetrofitClient.getAuthApi(this@VinculacionActivity)
+                        val res = authApi.linkWithCode(
+                            LinkCodeDto(
+                                code = codigo,
+                                patientUserId = sessionManager.getUserId().takeIf { it > 0 },
+                                patientDeviceId = sessionManager.getDeviceId()
+                            )
+                        )
+
+                        withContext(Dispatchers.Main) {
+                            btnVincular.isEnabled = true
+                            btnVincular.text = "Vincular"
+
+                            if (res.isSuccessful && res.body()?.success == true) {
+                                val caregiverDev = res.body()?.caregiverDeviceId
+                                sessionManager.setLinkedDeviceId(caregiverDev)
+                                prefs.edit().putString("codigo_ingresado", codigo).apply()
+                                mostrarMensaje("¡Vinculado exitosamente con tu cuidador!", true)
+                            } else {
+                                mostrarMensaje(res.body()?.message ?: "Código incorrecto o expirado.", false)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        withContext(Dispatchers.Main) {
+                            btnVincular.isEnabled = true
+                            btnVincular.text = "Vincular"
+                            prefs.edit().putString("codigo_ingresado", codigo).apply()
+                            mostrarMensaje("Código guardado localmente (Servidor: ${e.localizedMessage})", true)
+                        }
+                    }
+                }
             }
         }
 
