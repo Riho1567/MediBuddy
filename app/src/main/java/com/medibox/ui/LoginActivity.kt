@@ -21,8 +21,14 @@ class LoginActivity : AppCompatActivity() {
             val intent = Intent(this, MainActivity::class.java).apply {
                 putExtra("USUARIO_NOMBRE", usuario)
             }
+
+
             startActivity(intent)
             finish()
+        }
+
+        findViewById<Button>(R.id.btnIrRegistro).setOnClickListener {
+            startActivity(Intent(this, RegistroCuentaActivity::class.java))
         }
     }
 }
