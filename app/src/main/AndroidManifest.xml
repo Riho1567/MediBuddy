@@ -18,6 +18,11 @@
         android:theme="@style/Theme.MediBox">
 
 
+        <activity
+            android:name=".ui.MedicamentoActivity"
+            android:exported="false" />
+
+
 
         <activity
             android:name=".ui.AvisoDosisActivity"
