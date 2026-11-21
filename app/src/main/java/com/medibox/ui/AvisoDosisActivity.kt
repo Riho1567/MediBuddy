@@ -16,6 +16,11 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.widget.ImageViewCompat
 import com.google.android.material.button.MaterialButton
 import com.medibox.R
+import com.medibox.data.repositorio.MedicamentoRepository
+import com.medibox.data.repositorio.RegistroHistorial
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class AvisoDosisActivity : AppCompatActivity() {
 
@@ -67,14 +72,21 @@ class AvisoDosisActivity : AppCompatActivity() {
         when (estadoActual) {
             Estado.PENDIENTE -> aplicarEstado(Estado.DISPENSADA)
             Estado.PENDIENTE_SIN_CONEXION -> { /* sin conexión no se puede dispensar */ }
-            Estado.DISPENSADA -> aplicarEstado(Estado.TOMADA)
+            Estado.DISPENSADA -> {
+                MedicamentoRepository.tomaConfirmada = true
+                registrarToma("TOMADO")
+                aplicarEstado(Estado.TOMADA)
+            }
             else -> irAlInicio()
         }
     }
 
     private fun accionSecundaria() {
         when (estadoActual) {
-            Estado.PENDIENTE, Estado.PENDIENTE_SIN_CONEXION -> aplicarEstado(Estado.POSPUESTA)
+            Estado.PENDIENTE, Estado.PENDIENTE_SIN_CONEXION -> {
+                registrarToma("POSPUESTO 5 MIN")
+                aplicarEstado(Estado.POSPUESTA)
+            }
             Estado.DISPENSADA -> startActivity(Intent(this, HistorialActivity::class.java))
             else -> {}
         }
@@ -186,5 +198,18 @@ class AvisoDosisActivity : AppCompatActivity() {
             btn2.visibility = View.VISIBLE
             btn2.text = boton2
         }
+
+    }
+    private fun registrarToma(estado: String) {
+        val horaActual = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())
+        MedicamentoRepository.historial.add(
+            0,
+            RegistroHistorial(
+                medicamento = medicamento,
+                dosis = dosis,
+                hora = "Hoy - $horaActual",
+                estado = estado
+            )
+        )
     }
 }
