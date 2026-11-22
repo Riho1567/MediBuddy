@@ -16,8 +16,10 @@ import com.medibox.R
 import com.medibox.data.repositorio.MedicamentoRepository
 import com.medibox.network.SessionManager
 import com.medibox.network.WebSocketManager
+import com.medibox.servicios.AlarmScheduler
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+
 
 class MainActivity : AppCompatActivity() {
 
@@ -106,7 +108,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        pintarToma()
+        AlarmScheduler.programarDesdePrefs(this)
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 10)
+        }
     }
 
     private fun irAMedicina() {
