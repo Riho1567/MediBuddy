@@ -8,10 +8,18 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.View
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
 import com.medibox.R
 import com.medibox.data.repositorio.MedicamentoRepository
+import com.medibox.network.SessionManager
+import com.medibox.network.WebSocketManager
+import com.medibox.servicios.AlarmScheduler
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+
 
 class MainActivity : AppCompatActivity() {
 
@@ -34,8 +42,28 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<TextView>(R.id.tvSaludo).text = "Hola, $usuario"
 
+        val sessionManager = SessionManager(this)
+        val wsManager = WebSocketManager.getInstance(this)
+        wsManager.connect()
+
+        // Escuchar eventos WebSocket en segundo plano
+        lifecycleScope.launch {
+            wsManager.eventsFlow.collectLatest { msg ->
+                if (msg.type == "ALERT") {
+                    val alertType = msg.payload["alertType"] as? String
+                    if (alertType == "MEDICATION_TAKEN") {
+                        Toast.makeText(this@MainActivity, "🔔 Pastillero: Medicamento tomado", Toast.LENGTH_LONG).show()
+                    } else if (alertType == "LOW_BATTERY") {
+                        Toast.makeText(this@MainActivity, "⚠️ Batería baja en pastillero", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }
+
         // Volver al login
         findViewById<MaterialButton>(R.id.btnCerrarSesion).setOnClickListener {
+            sessionManager.clearSession()
+            wsManager.disconnect()
             startActivity(Intent(this, LoginActivity::class.java))
             finish()
         }
@@ -70,12 +98,22 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<View>(R.id.tarjetaVinculado).visibility =
             if (esCuidador) View.VISIBLE else View.GONE
-        findViewById<TextView>(R.id.tvVinculado).text = "Aún no hay un adulto mayor vinculado."
+        val linkedId = sessionManager.getLinkedDeviceId()
+        findViewById<TextView>(R.id.tvVinculado).text = if (linkedId != null) {
+            "Dispositivo vinculado: $linkedId"
+        } else {
+            "Aún no hay un adulto mayor vinculado."
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        pintarToma()
+        AlarmScheduler.programarDesdePrefs(this)
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 10)
+        }
     }
 
     private fun irAMedicina() {

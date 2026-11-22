@@ -21,6 +21,12 @@ import com.medibox.R
 import com.medibox.conexion.Esp32Client
 import com.medibox.data.repositorio.MedicamentoRepository
 import com.medibox.data.repositorio.RegistroHistorial
+import com.medibox.network.RetrofitClient
+import com.medibox.network.SessionManager
+import com.medibox.network.model.UpdateStatusDto
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -55,6 +61,7 @@ class AvisoDosisActivity : AppCompatActivity() {
             if (System.currentTimeMillis() - inicioVigilancia > VENTANA_MS) {
                 vigilando = false
                 registrarToma("NO CONFIRMADA")
+                reportarEstado("NO_CONFIRMADA")
                 aplicarEstado(Estado.NO_CONFIRMADA)
                 return
             }
@@ -110,6 +117,23 @@ class AvisoDosisActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
+    // Avisa al servidor el nuevo estado de la toma. Si no hay servidor, no pasa nada.
+    private fun reportarEstado(estado: String) {
+        val sesion = SessionManager(this)
+        val deviceId = sesion.getLinkedDeviceId() ?: "ESP32_MED_01"
+        val scheduleId = getSharedPreferences("medibuddy", MODE_PRIVATE).getLong("med_id", -1L)
+        if (scheduleId <= 0) return
+        val contexto = applicationContext
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                RetrofitClient.getDeviceApi(contexto)
+                    .updateScheduleStatus(deviceId, scheduleId, UpdateStatusDto(estado))
+            } catch (e: Exception) {
+                // Sin servidor: la app sigue funcionando con el pastillero.
+            }
+        }
+    }
+
     // Comprueba si el celular está en la red del pastillero.
     private fun verificarConexion() {
         if (estadoActual != Estado.PENDIENTE && estadoActual != Estado.PENDIENTE_SIN_CONEXION) return
@@ -126,12 +150,14 @@ class AvisoDosisActivity : AppCompatActivity() {
         cliente.dispense { ok, _ ->
             if (isFinishing || isDestroyed) return@dispense
             if (ok) {
+                reportarEstado("DISPENSADA")
                 aplicarEstado(Estado.DISPENSADA)
                 vigilando = true
                 inicioVigilancia = System.currentTimeMillis()
                 handler.post(vigilancia)
             } else {
                 registrarToma("ERROR AL DISPENSAR")
+                reportarEstado("ERROR")
                 aplicarEstado(Estado.ERROR)
             }
         }
@@ -140,6 +166,7 @@ class AvisoDosisActivity : AppCompatActivity() {
     private fun confirmarToma() {
         MedicamentoRepository.tomaConfirmada = true
         registrarToma("TOMADO")
+        reportarEstado("TOMADA")
         aplicarEstado(Estado.TOMADA)
     }
 
@@ -161,8 +188,10 @@ class AvisoDosisActivity : AppCompatActivity() {
     private fun accionSecundaria() {
         when (estadoActual) {
             Estado.PENDIENTE, Estado.PENDIENTE_SIN_CONEXION -> {
-                // TEMPORAL: falta reprogramar el aviso a los 5 minutos (etapa 2).
+                com.medibox.servicios.AlarmScheduler.programarEnMinutos(this, 5)
+                // TEMPORAL: falta reprogramar el aviso a los 5 minutos.
                 registrarToma("POSPUESTO 5 MIN")
+                reportarEstado("POSPUESTA")
                 aplicarEstado(Estado.POSPUESTA)
             }
             Estado.DISPENSADA -> startActivity(Intent(this, HistorialActivity::class.java))
