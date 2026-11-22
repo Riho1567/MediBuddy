@@ -1,11 +1,13 @@
 package com.medibox.ui
 
-import android.content.res.ColorStateList
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
@@ -16,6 +18,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.widget.ImageViewCompat
 import com.google.android.material.button.MaterialButton
 import com.medibox.R
+import com.medibox.conexion.Esp32Client
 import com.medibox.data.repositorio.MedicamentoRepository
 import com.medibox.data.repositorio.RegistroHistorial
 import java.text.SimpleDateFormat
@@ -29,11 +32,43 @@ class AvisoDosisActivity : AppCompatActivity() {
         TOMADA, POSPUESTA, TARDIA, NO_CONFIRMADA, ERROR
     }
 
+    companion object {
+        private const val VENTANA_MS = 5 * 60 * 1000L   // tiempo para confirmar
+        private const val CADA_MS = 2000L               // cada cuánto se pregunta al pastillero
+    }
+
     private var estadoActual = Estado.PENDIENTE
     private lateinit var medicamento: String
     private lateinit var dosis: String
     private lateinit var hora: String
     private lateinit var horaRegistro: String
+    private lateinit var cliente: Esp32Client
+
+    private val handler = Handler(Looper.getMainLooper())
+    private var vigilando = false
+    private var inicioVigilancia = 0L
+
+    // Pregunta al pastillero si ya se presionó el botón físico.
+    private val vigilancia = object : Runnable {
+        override fun run() {
+            if (!vigilando) return
+            if (System.currentTimeMillis() - inicioVigilancia > VENTANA_MS) {
+                vigilando = false
+                registrarToma("NO CONFIRMADA")
+                aplicarEstado(Estado.NO_CONFIRMADA)
+                return
+            }
+            cliente.estado { ok, cuerpo ->
+                if (!vigilando || isFinishing) return@estado
+                if (ok && cuerpo.trim() == "tomado") {
+                    vigilando = false
+                    confirmarToma()
+                } else {
+                    handler.postDelayed(this, CADA_MS)
+                }
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,17 +80,15 @@ class AvisoDosisActivity : AppCompatActivity() {
             setTurnScreenOn(true)
         }
 
+        cliente = Esp32Client(this)
+
         medicamento = intent.getStringExtra("MEDICAMENTO") ?: "Naproxeno"
         dosis = intent.getStringExtra("DOSIS") ?: "1 tableta · 500 mg"
         hora = intent.getStringExtra("HORA") ?: "8:00 p. m."
         horaRegistro = intent.getStringExtra("HORA_REGISTRO") ?: "8:09 p. m."
-        val conectado = intent.getBooleanExtra("PASTILLERO_CONECTADO", true)
 
-        // Para probar cada estado, cambia "PENDIENTE" por el nombre del estado
-        // (por ejemplo "TARDIA" o "ERROR").
+        // Para probar un estado, pasa "ESTADO" por intent (por ejemplo "TARDIA" o "ERROR").
         val nombre = intent.getStringExtra("ESTADO") ?: "PENDIENTE"
-        var inicial = Estado.valueOf(nombre)
-        if (inicial == Estado.PENDIENTE && !conectado) inicial = Estado.PENDIENTE_SIN_CONEXION
 
         findViewById<TextView>(R.id.tvMedicamento).text = medicamento
         findViewById<TextView>(R.id.tvDosis).text = dosis
@@ -63,19 +96,63 @@ class AvisoDosisActivity : AppCompatActivity() {
         findViewById<MaterialButton>(R.id.btnDispensar).setOnClickListener { accionPrimaria() }
         findViewById<MaterialButton>(R.id.btnRecordar).setOnClickListener { accionSecundaria() }
 
-        aplicarEstado(inicial)
+        aplicarEstado(Estado.valueOf(nombre))
     }
 
-    // TEMPORAL: estas transiciones simulan el flujo. Con el pastillero y el
-    // servidor, el estado lo decide la respuesta real.
+    override fun onResume() {
+        super.onResume()
+        verificarConexion()
+    }
+
+    override fun onDestroy() {
+        vigilando = false
+        handler.removeCallbacksAndMessages(null)
+        super.onDestroy()
+    }
+
+    // Comprueba si el celular está en la red del pastillero.
+    private fun verificarConexion() {
+        if (estadoActual != Estado.PENDIENTE && estadoActual != Estado.PENDIENTE_SIN_CONEXION) return
+        cliente.status { ok, _ ->
+            if (isFinishing || isDestroyed) return@status
+            if (estadoActual == Estado.PENDIENTE || estadoActual == Estado.PENDIENTE_SIN_CONEXION) {
+                aplicarEstado(if (ok) Estado.PENDIENTE else Estado.PENDIENTE_SIN_CONEXION)
+            }
+        }
+    }
+
+    private fun dispensar() {
+        findViewById<MaterialButton>(R.id.btnDispensar).isEnabled = false
+        cliente.dispense { ok, _ ->
+            if (isFinishing || isDestroyed) return@dispense
+            if (ok) {
+                aplicarEstado(Estado.DISPENSADA)
+                vigilando = true
+                inicioVigilancia = System.currentTimeMillis()
+                handler.post(vigilancia)
+            } else {
+                registrarToma("ERROR AL DISPENSAR")
+                aplicarEstado(Estado.ERROR)
+            }
+        }
+    }
+
+    private fun confirmarToma() {
+        MedicamentoRepository.tomaConfirmada = true
+        registrarToma("TOMADO")
+        aplicarEstado(Estado.TOMADA)
+    }
+
     private fun accionPrimaria() {
         when (estadoActual) {
-            Estado.PENDIENTE -> aplicarEstado(Estado.DISPENSADA)
+            Estado.PENDIENTE -> dispensar()
             Estado.PENDIENTE_SIN_CONEXION -> { /* sin conexión no se puede dispensar */ }
             Estado.DISPENSADA -> {
-                MedicamentoRepository.tomaConfirmada = true
-                registrarToma("TOMADO")
-                aplicarEstado(Estado.TOMADA)
+                // Alternativa al botón físico: confirma desde la app.
+                vigilando = false
+                cliente.taken { _, _ ->
+                    if (!isFinishing && !isDestroyed) confirmarToma()
+                }
             }
             else -> irAlInicio()
         }
@@ -84,12 +161,26 @@ class AvisoDosisActivity : AppCompatActivity() {
     private fun accionSecundaria() {
         when (estadoActual) {
             Estado.PENDIENTE, Estado.PENDIENTE_SIN_CONEXION -> {
+                // TEMPORAL: falta reprogramar el aviso a los 5 minutos (etapa 2).
                 registrarToma("POSPUESTO 5 MIN")
                 aplicarEstado(Estado.POSPUESTA)
             }
             Estado.DISPENSADA -> startActivity(Intent(this, HistorialActivity::class.java))
             else -> {}
         }
+    }
+
+    private fun registrarToma(estado: String) {
+        val horaActual = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())
+        MedicamentoRepository.historial.add(
+            0,
+            RegistroHistorial(
+                medicamento = medicamento,
+                dosis = dosis,
+                hora = "Hoy - $horaActual",
+                estado = estado
+            )
+        )
     }
 
     private fun irAlInicio() {
@@ -114,7 +205,6 @@ class AvisoDosisActivity : AppCompatActivity() {
         val btn1 = findViewById<MaterialButton>(R.id.btnDispensar)
         val btn2 = findViewById<MaterialButton>(R.id.btnRecordar)
 
-        // Insignia de conexión
         val sinConexion = estado == Estado.PENDIENTE_SIN_CONEXION
         chip.setBackgroundResource(
             if (sinConexion) R.drawable.bg_chip_sin_conexion else R.drawable.bg_chip_conectado
@@ -125,7 +215,6 @@ class AvisoDosisActivity : AppCompatActivity() {
         tvChip.text = if (sinConexion) "Pastillero sin conexión" else "Pastillero conectado"
         alerta.visibility = if (sinConexion) View.VISIBLE else View.GONE
 
-        // Datos de cada estado
         val tituloTxt: String
         val colorTitulo: String
         val icono: Int
@@ -145,7 +234,7 @@ class AvisoDosisActivity : AppCompatActivity() {
             Estado.DISPENSADA -> {
                 tituloTxt = "Medicamento dispensado"; colorTitulo = "#0B3A75"
                 icono = R.drawable.ic_pastilla; fondo = "#E8EEF7"; trazo = "#0B3A75"
-                detalleTxt = "Tienes 5 min para confirmar"
+                detalleTxt = "Presiona el botón del pastillero. Tienes 5 min."
                 boton1 = "Ya lo tomé, ir al inicio"; boton2 = "Ver historial"
             }
             Estado.TOMADA -> {
@@ -198,18 +287,5 @@ class AvisoDosisActivity : AppCompatActivity() {
             btn2.visibility = View.VISIBLE
             btn2.text = boton2
         }
-
-    }
-    private fun registrarToma(estado: String) {
-        val horaActual = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())
-        MedicamentoRepository.historial.add(
-            0,
-            RegistroHistorial(
-                medicamento = medicamento,
-                dosis = dosis,
-                hora = "Hoy - $horaActual",
-                estado = estado
-            )
-        )
     }
 }
