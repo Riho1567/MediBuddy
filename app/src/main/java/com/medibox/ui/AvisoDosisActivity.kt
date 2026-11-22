@@ -167,6 +167,7 @@ class AvisoDosisActivity : AppCompatActivity() {
         MedicamentoRepository.tomaConfirmada = true
         registrarToma("TOMADO")
         reportarEstado("TOMADA")
+        com.medibox.servicios.AlarmaReceiver.mostrarTomada(this, medicamento)
         aplicarEstado(Estado.TOMADA)
     }
 

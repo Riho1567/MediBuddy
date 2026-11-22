@@ -27,8 +27,8 @@ class Esp32Client(context: Context) {
     companion object {
         // true = simula el pastillero. Ponlo en false para probar con el ESP32 real.
         const val MODO_DEMO = false
-        const val IP = "192.168.4
-    }.1"
+        const val IP = "192.168.4.1"
+    }
 
     private val appContext = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
@@ -36,7 +36,7 @@ class Esp32Client(context: Context) {
     fun status(callback: (Boolean, String) -> Unit) = request("/status", callback)
     fun dispense(callback: (Boolean, String) -> Unit) = request("/dispense", callback)
     fun taken(callback: (Boolean, String) -> Unit) = request("/taken", callback)
-    git add .    fun estado(callback: (Boolean, String) -> Unit) = request("/estado", callback)
+    fun estado(callback: (Boolean, String) -> Unit) = request("/estado", callback)
     fun reset(callback: (Boolean, String) -> Unit) = request("/reset", callback)
 
     @Suppress("DEPRECATION")

@@ -6,12 +6,47 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.medibox.R
 import com.medibox.ui.AvisoDosisActivity
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class AlarmaReceiver : BroadcastReceiver() {
+
+    companion object {
+        private const val CANAL_AVISO = "medibuddy_recordatorios"
+        private const val CANAL_TOMADA = "medibuddy_confirmaciones"
+
+        // Notificación "Medicamento tomado", se llama al confirmar la toma.
+        fun mostrarTomada(context: Context, medicamento: String) {
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                manager.getNotificationChannel(CANAL_TOMADA) == null) {
+                manager.createNotificationChannel(
+                    NotificationChannel(
+                        CANAL_TOMADA, "Confirmaciones de toma",
+                        NotificationManager.IMPORTANCE_HIGH
+                    ).apply { description = "Avisa cuando se confirma que el medicamento fue tomado" }
+                )
+            }
+            val hora = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+            val texto = "$medicamento fue tomado a las $hora"
+            val n = NotificationCompat.Builder(context, CANAL_TOMADA)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle("MediBuddy · Medicamento tomado ✓")
+                .setContentText(texto)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(texto))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .build()
+            try { manager.notify(1002, n) } catch (e: SecurityException) { }
+        }
+    }
 
     override fun onReceive(context: Context, intent: Intent) {
         val p = context.getSharedPreferences("medibuddy", Context.MODE_PRIVATE)
@@ -21,22 +56,28 @@ class AlarmaReceiver : BroadcastReceiver() {
         val m = (p.all["med_minuto"] as? Number)?.toInt() ?: 0
         val hora = String.format("%d:%02d", h, m)
 
-        mostrarNotificacion(context, nombre, dosis, hora)
-
-        // Deja programado el aviso de mañana.
-        AlarmScheduler.programarDesdePrefs(context)
+        mostrarAviso(context, nombre, dosis, hora)
+        AlarmScheduler.programarDesdePrefs(context)   // deja lista la de mañana
     }
 
-    private fun mostrarNotificacion(context: Context, medicamento: String, dosis: String, hora: String) {
-        val canalId = "canal_tomas_medibox"
+    private fun mostrarAviso(context: Context, medicamento: String, dosis: String, hora: String) {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val sonido = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            manager.getNotificationChannel(CANAL_AVISO) == null) {
             val canal = NotificationChannel(
-                canalId, "Avisos de Tomas MediBox", NotificationManager.IMPORTANCE_HIGH
+                CANAL_AVISO, "Recordatorios de medicamentos", NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Notificaciones para la toma de medicamentos"
+                description = "Avisos cuando es hora de tomar un medicamento"
                 enableVibration(true)
+                setSound(
+                    sonido,
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
             }
             manager.createNotificationChannel(canal)
         }
@@ -47,22 +88,26 @@ class AlarmaReceiver : BroadcastReceiver() {
             putExtra("DOSIS", dosis)
             putExtra("HORA", hora)
         }
-        val pendingIntent = PendingIntent.getActivity(
+        val pending = PendingIntent.getActivity(
             context, 0, intentAviso,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notificacion = NotificationCompat.Builder(context, canalId)
+        val texto = "Es hora de tomar $medicamento ($dosis)"
+        val n = NotificationCompat.Builder(context, CANAL_AVISO)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("¡Hora de tu medicamento!")
-            .setContentText("Es momento de tomar: $medicamento ($dosis)")
+            .setContentTitle("MediBuddy")
+            .setContentText(texto)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(texto))
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setAutoCancel(true)
-            .setContentIntent(pendingIntent)
-            .setFullScreenIntent(pendingIntent, true)
+            .setContentIntent(pending)
+            .setFullScreenIntent(pending, true)
+            .setSound(sonido)
+            .setVibrate(longArrayOf(0, 500, 300, 500, 300, 500))
             .build()
 
-        manager.notify(1001, notificacion)
+        try { manager.notify(1001, n) } catch (e: SecurityException) { }
     }
 }
