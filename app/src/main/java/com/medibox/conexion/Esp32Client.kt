@@ -27,8 +27,8 @@ class Esp32Client(context: Context) {
     companion object {
         // true = simula el pastillero. Ponlo en false para probar con el ESP32 real.
         const val MODO_DEMO = false
-        const val IP = "192.168.4.1"
-    }
+        const val IP = "192.168.4
+    }.1"
 
     private val appContext = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
