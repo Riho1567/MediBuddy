@@ -36,7 +36,7 @@ class Esp32Client(context: Context) {
     fun status(callback: (Boolean, String) -> Unit) = request("/status", callback)
     fun dispense(callback: (Boolean, String) -> Unit) = request("/dispense", callback)
     fun taken(callback: (Boolean, String) -> Unit) = request("/taken", callback)
-    fun estado(callback: (Boolean, String) -> Unit) = request("/estado", callback)
+    git add .    fun estado(callback: (Boolean, String) -> Unit) = request("/estado", callback)
     fun reset(callback: (Boolean, String) -> Unit) = request("/reset", callback)
 
     @Suppress("DEPRECATION")
